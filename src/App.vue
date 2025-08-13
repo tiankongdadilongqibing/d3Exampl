@@ -65,6 +65,14 @@
           <MindMap />
         </div>
       </div>
+
+      <!-- 桑基图示例 -->
+      <div v-show="activeChart === 'sankey-chart'" class="example">
+        <h2 class="chart-title">桑基图示例</h2>
+        <div class="chart-container">
+          <SankeyChart />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -77,6 +85,7 @@ import ScatterPlot from './components/ScatterPlot.vue'
 import PieChart from './components/PieChart.vue'
 import ForceDiagram from './components/ForceDiagram.vue'
 import MindMap from './components/MindMap.vue'
+import SankeyChart from './components/SankeyChart.vue'
 
 const activeChart = ref('bar-chart')
 
@@ -86,7 +95,8 @@ const chartTypes = [
   { id: 'scatter-plot', name: '散点图' },
   { id: 'pie-chart', name: '饼图' },
   { id: 'force-diagram', name: '力导向图' },
-  { id: 'mind-map', name: '思维导图' }
+  { id: 'mind-map', name: '思维导图' },
+  { id: 'sankey-chart', name: '桑基图' }
 ]
 </script>
 
