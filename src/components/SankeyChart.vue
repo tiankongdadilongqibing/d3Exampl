@@ -1,6 +1,10 @@
 <template>
   <div class="sankey-chart">
     <h2>桑基图 (Sankey Diagram)</h2>
+    <div class="chart-controls">
+      <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
+      <span class="hint">点击空白区域可取消高亮</span>
+    </div>
     <div class="chart-container" ref="chartContainer"></div>
     
     <!-- 调试面板 -->
@@ -28,6 +32,11 @@ import * as d3 from 'd3'
 import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
 
 const chartContainer = ref(null)
+const activeNodeId = ref(null)
+// 保存布局后的节点，便于按 id 定位节点（含 group/value 等信息）
+let idToNode = {}
+// 各分组的最大 value（用于 group=2 的进度条归一化）
+let groupMaxValue = { 0: 0, 1: 0, 2: 0 }
 
 // 节点状态管理
 const nodeStates = ref({
@@ -74,11 +83,47 @@ const data = {
   ]
 }
 
-// 生成节点HTML内容
+// 生成节点HTML内容（按 group 区分）
 const generateNodeHTML = (d, colorScale) => {
-  const nodeState = nodeStates.value[d.id] || { enabled: false, priority: "中", features: {} }
+  const nodeState = nodeStates.value[d.id] || { enabled: false, priority: '中', features: {} }
   const nodeColor = colorScale(d.id)
-  
+
+  // group = 2: 蓝条灰底进度条
+  if (d.group === 2) {
+    const maxVal = groupMaxValue[2] || 1
+    const percent = Math.max(0, Math.min(1, (d.value || 0) / maxVal))
+    const percentText = Math.round(percent * 100) + '%'
+    return `
+      <div style="width:100%;height:100%;box-sizing:border-box;padding:2px 4px;background:#f7f7f7;border:1px solid #bbb;border-radius:4px;font-family:Arial,sans-serif;font-size:10px;color:#333;display:flex;align-items:center;gap:6px;">
+        <div style="flex:0 0 auto;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:bold;color:#333;">${d.id}</div>
+        <div style="flex:1 1 auto;height:10px;background:#e0e0e0;border-radius:5px;overflow:hidden;border:1px solid #d0d0d0;position:relative;">
+          <div style="width:${percent*100}%;height:100%;background:#2196f3;"></div>
+          <div style="position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;text-shadow:0 1px 0 rgba(0,0,0,0.2);">${percentText}</div>
+        </div>
+      </div>
+    `
+  }
+
+  // group = 1: 外层展示标题，内层白底说明文字
+  if (d.group === 1) {
+    const enabledFeatures = Object.entries(nodeState.features || {})
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+      .join(', ')
+    const description = `优先级: ${nodeState.priority}；已启用特性: ${enabledFeatures || '无'}`
+    return `
+      <div style="width:100%;height:100%;box-sizing:border-box;border:1px solid #333;border-radius:4px;overflow:hidden;font-family:Arial,sans-serif;background:${nodeColor};color:#fff;display:flex;align-items:stretch;">
+        <div style="flex:0 0 150px;display:flex;align-items:center;justify-content:flex-start;padding:6px 10px;font-weight:bold;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.id}</div>
+        <div style="flex:1;display:flex;align-items:center;padding:6px;">
+          <div style="width:100%;background:#fff;color:#333;border-radius:3px;padding:6px 8px;font-size:9px;line-height:1.4;">
+            ${description}
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  // 其他（group = 0）保留原有的交互式内容
   return `
     <div style="
       width: 100%;
@@ -97,65 +142,35 @@ const generateNodeHTML = (d, colorScale) => {
       cursor: pointer;
       overflow: hidden;
     ">
-      <!-- 标题和启用状态 -->
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
         <strong style="font-size: 9px; line-height: 1;">${d.id}</strong>
         <label style="display: flex; align-items: center; gap: 2px; font-size: 7px;">
-          <input type="checkbox" 
-                 ${nodeState.enabled ? 'checked' : ''} 
-                 onchange="window.handleNodeCheckbox('${d.id}', this.checked)"
-                 style="width: 10px; height: 10px;">
+          <input type="checkbox" ${nodeState.enabled ? 'checked' : ''} onchange="window.handleNodeCheckbox('${d.id}', this.checked)" style="width: 10px; height: 10px;">
           <span>启用</span>
         </label>
       </div>
-      
-      <!-- 优先级选择 -->
       <div style="margin-bottom: 2px;">
-        <select onchange="window.handlePriorityChange('${d.id}', this.value)" 
-                style="width: 100%; font-size: 7px; padding: 1px; border-radius: 2px; border: none;">
-          <option value="高" ${nodeState.priority === "高" ? 'selected' : ''}>高</option>
-          <option value="中" ${nodeState.priority === "中" ? 'selected' : ''}>中</option>
-          <option value="低" ${nodeState.priority === "低" ? 'selected' : ''}>低</option>
+        <select onchange="window.handlePriorityChange('${d.id}', this.value)" style="width: 100%; font-size: 7px; padding: 1px; border-radius: 2px; border: none;">
+          <option value="高" ${nodeState.priority === '高' ? 'selected' : ''}>高</option>
+          <option value="中" ${nodeState.priority === '中' ? 'selected' : ''}>中</option>
+          <option value="低" ${nodeState.priority === '低' ? 'selected' : ''}>低</option>
         </select>
       </div>
-      
-      <!-- 特性配置 -->
       <div style="max-height: 40px; overflow-y: auto; background: rgba(255,255,255,0.1); border-radius: 2px; padding: 1px;">
         <div style="font-size: 6px; margin-bottom: 1px; text-align: center;">特性</div>
-        ${Object.entries(nodeState.features).map(([feature, enabled]) => `
+        ${Object.entries(nodeState.features || {}).map(([feature, enabled]) => `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1px; font-size: 6px; line-height: 1;">
             <span style="flex: 1; overflow: hidden; text-overflow: ellipsis;">${feature}</span>
-            <input type="checkbox" 
-                   ${enabled ? 'checked' : ''} 
-                   onchange="window.handleFeatureChange('${d.id}', '${feature}', this.checked)"
-                   style="width: 6px; height: 6px; margin-left: 2px;">
+            <input type="checkbox" ${enabled ? 'checked' : ''} onchange="window.handleFeatureChange('${d.id}', '${feature}', this.checked)" style="width: 6px; height: 6px; margin-left: 2px;">
           </div>
         `).join('')}
       </div>
-      
-      <!-- 操作按钮 -->
       <div style="display: flex; gap: 1px; margin-top: 2px;">
-        <button onclick="window.handleActionClick('${d.id}', 'config')" 
-                style="flex: 1; font-size: 6px; padding: 1px; border: none; border-radius: 1px; background: rgba(255,255,255,0.2); color: white; cursor: pointer; line-height: 1;">
-          配置
-        </button>
-        <button onclick="window.handleActionClick('${d.id}', 'deploy')" 
-                style="flex: 1; font-size: 6px; padding: 1px; border: none; border-radius: 1px; background: rgba(255,255,255,0.2); color: white; cursor: pointer; line-height: 1;">
-          部署
-        </button>
+        <button onclick="window.handleActionClick('${d.id}', 'config')" style="flex: 1; font-size: 6px; padding: 1px; border: none; border-radius: 1px; background: rgba(255,255,255,0.2); color: white; cursor: pointer; line-height: 1;">配置</button>
+        <button onclick="window.handleActionClick('${d.id}', 'deploy')" style="flex: 1; font-size: 6px; padding: 1px; border: none; border-radius: 1px; background: rgba(255,255,255,0.2); color: white; cursor: pointer; line-height: 1;">部署</button>
       </div>
-      
-      <!-- 状态指示器 -->
       <div style="text-align: center; font-size: 6px; margin-top: 1px;">
-        <span style="
-          padding: 1px 3px;
-          border-radius: 1px;
-          background: ${nodeState.enabled ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)'};
-          display: inline-block;
-          line-height: 1;
-        ">
-          ${nodeState.enabled ? '✓ 活跃' : '✗ 未启用'}
-        </span>
+        <span style="padding: 1px 3px; border-radius: 1px; background: ${nodeState.enabled ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)'}; display: inline-block; line-height: 1;">${nodeState.enabled ? '✓ 活跃' : '✗ 未启用'}</span>
       </div>
     </div>
   `
@@ -192,7 +207,7 @@ const handleActionClick = (nodeId, action) => {
 const updateNodeDisplay = (nodeId) => {
   const node = d3.select(chartContainer.value).select(`foreignObject[data-node-id="${nodeId}"]`)
   if (!node.empty()) {
-    const nodeData = { id: nodeId }
+    const nodeData = idToNode[nodeId] || { id: nodeId, group: 0, value: 0 }
     const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
     node.html(generateNodeHTML(nodeData, colorScale))
   }
@@ -217,13 +232,20 @@ onMounted(() => {
     .attr("width", width)
     .attr("height", height)
     .style("font", "12px sans-serif")
+    .on("click", (event) => {
+      // 检查点击的是否是空白区域（不是节点或连接线）
+      const target = event.target
+      if (target.tagName === 'svg' || target.classList.contains('chart-container')) {
+        resetHighlight()
+      }
+    })
 
   const g = svg.append("g")
 
   // 创建桑基图布局
   const sankeyLayout = sankey()
-    .nodeWidth(120)  // 增加节点宽度
-    .nodePadding(20) // 增加节点间距
+    .nodeWidth(260)  // 进一步增加节点宽度以便 group=1 文本完整显示
+    .nodePadding(24) // 适当增加节点间距，减少拥挤
     .extent([[1, 1], [width - 1, height - 5]])
 
   // 计算布局
@@ -232,31 +254,59 @@ onMounted(() => {
     links: data.links.map(d => Object.assign({}, d))
   })
 
+  // 建立 id -> node 的索引，并计算各组最大值
+  idToNode = {}
+  groupMaxValue = { 0: 0, 1: 0, 2: 0 }
+  nodes.forEach(n => {
+    idToNode[n.id] = n
+    const gKey = n.group in groupMaxValue ? n.group : 0
+    const v = n.value || 0
+    if (v > groupMaxValue[gKey]) groupMaxValue[gKey] = v
+  })
+
+  // 将与 group=2 节点相连的链接锚定到节点的垂直中点
+  links.forEach(l => {
+    if (l.source && l.source.group === 2) {
+      l.y0 = (l.source.y0 + l.source.y1) / 2
+    }
+    if (l.target && l.target.group === 2) {
+      l.y1 = (l.target.y0 + l.target.y1) / 2
+    }
+  })
+
+  // 为较小高度节点适配连接线厚度：将最大厚度压到 10px 以内
+  const maxLinkThickness = d3.max(links, d => d.width) || 1
+  const linkWidthScale = d3.scaleLinear().domain([0, maxLinkThickness]).range([1, 10])
+
   // 创建连接线
-  g.append("g")
+  const linkGroup = g.append("g")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.4)
     .selectAll("path")
     .data(links)
     .join("path")
     .attr("stroke", d => color(d.source.id))
-    .attr("stroke-width", d => Math.max(1, d.width))
+    .attr("stroke-width", d => linkWidthScale(d.width))
     .attr("d", sankeyLinkHorizontal())
+    .attr("class", "link")
+    .attr("data-source", d => d.source.id)
+    .attr("data-target", d => d.target.id)
 
   // 创建节点 - 使用foreignObject嵌入自定义DOM元素
-  g.append("g")
+  const nodeGroup = g.append("g")
     .selectAll("foreignObject")
     .data(nodes)
     .join("foreignObject")
     .attr("x", d => d.x0)
-    .attr("y", d => d.y0)
+    .attr("y", d => d.group === 2 ? d.y0 + Math.max(0, (d.y1 - d.y0 - 24) / 2) : d.y0)
     .attr("width", d => d.x1 - d.x0)
-    .attr("height", d => d.y1 - d.y0)
+    .attr("height", d => d.group === 2 ? 24 : (d.y1 - d.y0))
     .attr("data-node-id", d => d.id)
+    .attr("class", "node")
     .html(d => generateNodeHTML(d, color))
 
   // 添加节点标签
-  g.append("g")
+  const labelGroup = g.append("g")
     .selectAll("text")
     .data(nodes)
     .join("text")
@@ -264,13 +314,155 @@ onMounted(() => {
     .attr("y", d => (d.y1 + d.y0) / 2)
     .attr("dy", "0.35em")
     .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
+    .attr("class", "node-label")
+    .attr("data-node-id", d => d.id)
     .text(d => d.id)
     .style("font-size", "11px")
     .style("font-weight", "bold")
 
+  // 点击节点激活高亮效果
+  const handleNodeClick = (event, d) => {
+    // 阻止事件冒泡到SVG容器
+    event.stopPropagation()
+    
+    const nodeId = d.id
+    
+    // 如果点击的是当前激活的节点，则取消激活
+    if (activeNodeId.value === nodeId) {
+      activeNodeId.value = null
+      resetAllElements()
+      return
+    }
+    
+    // 设置新的激活节点
+    activeNodeId.value = nodeId
+    
+    // 高亮相关连接
+    linkGroup
+      .style("opacity", link => 
+        link.source.id === nodeId || link.target.id === nodeId ? 1 : 0.1
+      )
+      .style("stroke-width", link => 
+        link.source.id === nodeId || link.target.id === nodeId ? 
+        linkWidthScale(link.width) : Math.max(1, linkWidthScale(link.width) * 0.6)
+      )
+    
+    // 高亮相关节点标签
+    labelGroup
+      .style("opacity", label => 
+        label.id === nodeId ? 1 : 0.3
+      )
+      .style("font-weight", label => 
+        label.id === nodeId ? "bold" : "normal"
+      )
+    
+    // 高亮相关节点（包括源节点和目标节点）
+    nodeGroup
+      .style("opacity", node => {
+        // 检查当前节点是否与激活节点有连接关系
+        const hasConnection = links.some(link => 
+          (link.source.id === nodeId && link.target.id === node.id) ||
+          (link.target.id === nodeId && link.source.id === node.id) ||
+          node.id === nodeId
+        )
+        return hasConnection ? 1 : 0.3
+      })
+  }
+
+  const handleMouseOut = (event, d) => {
+    // 恢复所有元素的默认状态
+    linkGroup
+      .style("opacity", 0.4)
+      .style("stroke-width", d => linkWidthScale(d.width))
+    
+    nodeGroup.style("opacity", 1)
+    
+    labelGroup
+      .style("opacity", 1)
+      .style("font-weight", "bold")
+  }
+
+  // 为节点添加点击事件
+  nodeGroup
+    .on("click", handleNodeClick)
+
+  // 为连接线添加点击事件（可选，让连接线也能触发高亮）
+  linkGroup
+    .on("click", (event, d) => {
+      // 阻止事件冒泡到SVG容器
+      event.stopPropagation()
+      
+      // 当点击连接线时，高亮相关的两个节点
+      const sourceId = d.source.id
+      const targetId = d.target.id
+      
+      // 如果点击的是当前激活的连接，则取消激活
+      if (activeNodeId.value === sourceId || activeNodeId.value === targetId) {
+        activeNodeId.value = null
+        resetAllElements()
+        return
+      }
+      
+      // 设置激活节点为源节点
+      activeNodeId.value = sourceId
+      
+      // 高亮相关连接
+      linkGroup
+        .style("opacity", link => 
+          (link.source.id === sourceId && link.target.id === targetId) ||
+          (link.source.id === targetId && link.target.id === sourceId) ? 1 : 0.1
+        )
+        .style("stroke-width", link => 
+          (link.source.id === sourceId && link.target.id === targetId) ||
+          (link.source.id === targetId && link.target.id === sourceId) ? 
+          linkWidthScale(link.width) : Math.max(1, linkWidthScale(link.width) * 0.6)
+        )
+      
+      // 高亮相关节点标签
+      labelGroup
+        .style("opacity", label => 
+          label.id === sourceId || label.id === targetId ? 1 : 0.3
+        )
+        .style("font-weight", label => 
+          label.id === sourceId || label.id === targetId ? "bold" : "normal"
+        )
+      
+      // 高亮相关节点
+      nodeGroup
+        .style("opacity", node => 
+          node.id === sourceId || node.id === targetId ? 1 : 0.3
+        )
+    })
+
+
   // 设置全局事件处理器
   setupGlobalHandlers()
 })
+
+// 重置高亮效果
+const resetHighlight = () => {
+  activeNodeId.value = null
+  // 重置所有元素到默认状态
+  const linkGroup = d3.select(chartContainer.value).selectAll(".link")
+  const nodeGroup = d3.select(chartContainer.value).selectAll(".node")
+  const labelGroup = d3.select(chartContainer.value).selectAll(".node-label")
+  
+  if (!linkGroup.empty()) {
+    linkGroup
+      .style("opacity", 0.4)
+      .style("stroke-width", d => Math.max(1, d.width))
+  }
+  
+  if (!nodeGroup.empty()) {
+    nodeGroup.style("opacity", 1)
+  }
+  
+  if (!labelGroup.empty()) {
+    labelGroup
+      .style("opacity", 1)
+      .style("font-weight", "bold")
+  }
+}
 
 // 清理全局事件处理器
 onUnmounted(() => {
@@ -299,6 +491,7 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin: 20px 0;
   overflow: auto;
+  cursor: default;
 }
 
 .debug-panel {
@@ -364,6 +557,47 @@ onUnmounted(() => {
   margin-top: 5px;
   color: #666;
   font-size: 10px;
+  font-style: italic;
+}
+
+/* 鼠标悬浮高亮效果样式 */
+.node {
+  transition: opacity 0.3s ease;
+}
+
+.node:hover {
+  cursor: pointer;
+}
+
+.link {
+  transition: opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.node-label {
+  transition: opacity 0.3s ease, font-weight 0.3s ease;
+}
+
+/* 控制面板样式 */
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.active-info {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.hint {
+  color: #6c757d;
+  font-size: 12px;
   font-style: italic;
 }
 </style>
