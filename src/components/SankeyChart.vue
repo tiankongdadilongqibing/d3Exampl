@@ -1,6 +1,10 @@
 <template>
   <div class="sankey-chart">
     <h2>桑基图 (Sankey Diagram)</h2>
+    <div class="chart-controls">
+      <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
+      <span class="hint">点击空白区域可取消高亮</span>
+    </div>
     <div class="chart-container" ref="chartContainer"></div>
     
     <!-- 调试面板 -->
@@ -28,6 +32,7 @@ import * as d3 from 'd3'
 import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
 
 const chartContainer = ref(null)
+const activeNodeId = ref(null)
 
 // 节点状态管理
 const nodeStates = ref({
@@ -217,6 +222,13 @@ onMounted(() => {
     .attr("width", width)
     .attr("height", height)
     .style("font", "12px sans-serif")
+    .on("click", (event) => {
+      // 检查点击的是否是空白区域（不是节点或连接线）
+      const target = event.target
+      if (target.tagName === 'svg' || target.classList.contains('chart-container')) {
+        resetHighlight()
+      }
+    })
 
   const g = svg.append("g")
 
@@ -233,7 +245,7 @@ onMounted(() => {
   })
 
   // 创建连接线
-  g.append("g")
+  const linkGroup = g.append("g")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.4)
     .selectAll("path")
@@ -242,9 +254,12 @@ onMounted(() => {
     .attr("stroke", d => color(d.source.id))
     .attr("stroke-width", d => Math.max(1, d.width))
     .attr("d", sankeyLinkHorizontal())
+    .attr("class", "link")
+    .attr("data-source", d => d.source.id)
+    .attr("data-target", d => d.target.id)
 
   // 创建节点 - 使用foreignObject嵌入自定义DOM元素
-  g.append("g")
+  const nodeGroup = g.append("g")
     .selectAll("foreignObject")
     .data(nodes)
     .join("foreignObject")
@@ -253,10 +268,11 @@ onMounted(() => {
     .attr("width", d => d.x1 - d.x0)
     .attr("height", d => d.y1 - d.y0)
     .attr("data-node-id", d => d.id)
+    .attr("class", "node")
     .html(d => generateNodeHTML(d, color))
 
   // 添加节点标签
-  g.append("g")
+  const labelGroup = g.append("g")
     .selectAll("text")
     .data(nodes)
     .join("text")
@@ -264,13 +280,155 @@ onMounted(() => {
     .attr("y", d => (d.y1 + d.y0) / 2)
     .attr("dy", "0.35em")
     .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
+    .attr("class", "node-label")
+    .attr("data-node-id", d => d.id)
     .text(d => d.id)
     .style("font-size", "11px")
     .style("font-weight", "bold")
 
+  // 点击节点激活高亮效果
+  const handleNodeClick = (event, d) => {
+    // 阻止事件冒泡到SVG容器
+    event.stopPropagation()
+    
+    const nodeId = d.id
+    
+    // 如果点击的是当前激活的节点，则取消激活
+    if (activeNodeId.value === nodeId) {
+      activeNodeId.value = null
+      resetAllElements()
+      return
+    }
+    
+    // 设置新的激活节点
+    activeNodeId.value = nodeId
+    
+    // 高亮相关连接
+    linkGroup
+      .style("opacity", link => 
+        link.source.id === nodeId || link.target.id === nodeId ? 1 : 0.1
+      )
+      .style("stroke-width", link => 
+        link.source.id === nodeId || link.target.id === nodeId ? 
+        Math.max(1, link.width) : Math.max(1, link.width) * 0.3
+      )
+    
+    // 高亮相关节点标签
+    labelGroup
+      .style("opacity", label => 
+        label.id === nodeId ? 1 : 0.3
+      )
+      .style("font-weight", label => 
+        label.id === nodeId ? "bold" : "normal"
+      )
+    
+    // 高亮相关节点（包括源节点和目标节点）
+    nodeGroup
+      .style("opacity", node => {
+        // 检查当前节点是否与激活节点有连接关系
+        const hasConnection = links.some(link => 
+          (link.source.id === nodeId && link.target.id === node.id) ||
+          (link.target.id === nodeId && link.source.id === node.id) ||
+          node.id === nodeId
+        )
+        return hasConnection ? 1 : 0.3
+      })
+  }
+
+  const handleMouseOut = (event, d) => {
+    // 恢复所有元素的默认状态
+    linkGroup
+      .style("opacity", 0.4)
+      .style("stroke-width", d => Math.max(1, d.width))
+    
+    nodeGroup.style("opacity", 1)
+    
+    labelGroup
+      .style("opacity", 1)
+      .style("font-weight", "bold")
+  }
+
+  // 为节点添加点击事件
+  nodeGroup
+    .on("click", handleNodeClick)
+
+  // 为连接线添加点击事件（可选，让连接线也能触发高亮）
+  linkGroup
+    .on("click", (event, d) => {
+      // 阻止事件冒泡到SVG容器
+      event.stopPropagation()
+      
+      // 当点击连接线时，高亮相关的两个节点
+      const sourceId = d.source.id
+      const targetId = d.target.id
+      
+      // 如果点击的是当前激活的连接，则取消激活
+      if (activeNodeId.value === sourceId || activeNodeId.value === targetId) {
+        activeNodeId.value = null
+        resetAllElements()
+        return
+      }
+      
+      // 设置激活节点为源节点
+      activeNodeId.value = sourceId
+      
+      // 高亮相关连接
+      linkGroup
+        .style("opacity", link => 
+          (link.source.id === sourceId && link.target.id === targetId) ||
+          (link.source.id === targetId && link.target.id === sourceId) ? 1 : 0.1
+        )
+        .style("stroke-width", link => 
+          (link.source.id === sourceId && link.target.id === targetId) ||
+          (link.source.id === targetId && link.target.id === sourceId) ? 
+          Math.max(1, link.width) : Math.max(1, link.width) * 0.3
+        )
+      
+      // 高亮相关节点标签
+      labelGroup
+        .style("opacity", label => 
+          label.id === sourceId || label.id === targetId ? 1 : 0.3
+        )
+        .style("font-weight", label => 
+          label.id === sourceId || label.id === targetId ? "bold" : "normal"
+        )
+      
+      // 高亮相关节点
+      nodeGroup
+        .style("opacity", node => 
+          node.id === sourceId || node.id === targetId ? 1 : 0.3
+        )
+    })
+
+
   // 设置全局事件处理器
   setupGlobalHandlers()
 })
+
+// 重置高亮效果
+const resetHighlight = () => {
+  activeNodeId.value = null
+  // 重置所有元素到默认状态
+  const linkGroup = d3.select(chartContainer.value).selectAll(".link")
+  const nodeGroup = d3.select(chartContainer.value).selectAll(".node")
+  const labelGroup = d3.select(chartContainer.value).selectAll(".node-label")
+  
+  if (!linkGroup.empty()) {
+    linkGroup
+      .style("opacity", 0.4)
+      .style("stroke-width", d => Math.max(1, d.width))
+  }
+  
+  if (!nodeGroup.empty()) {
+    nodeGroup.style("opacity", 1)
+  }
+  
+  if (!labelGroup.empty()) {
+    labelGroup
+      .style("opacity", 1)
+      .style("font-weight", "bold")
+  }
+}
 
 // 清理全局事件处理器
 onUnmounted(() => {
@@ -299,6 +457,7 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin: 20px 0;
   overflow: auto;
+  cursor: default;
 }
 
 .debug-panel {
@@ -364,6 +523,47 @@ onUnmounted(() => {
   margin-top: 5px;
   color: #666;
   font-size: 10px;
+  font-style: italic;
+}
+
+/* 鼠标悬浮高亮效果样式 */
+.node {
+  transition: opacity 0.3s ease;
+}
+
+.node:hover {
+  cursor: pointer;
+}
+
+.link {
+  transition: opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.node-label {
+  transition: opacity 0.3s ease, font-weight 0.3s ease;
+}
+
+/* 控制面板样式 */
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.active-info {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.hint {
+  color: #6c757d;
+  font-size: 12px;
   font-style: italic;
 }
 </style>
