@@ -5,6 +5,10 @@
       <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
       <span class="hint">点击空白区域可取消高亮</span>
     </div>
+    <div class="chart-controls">
+      <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
+      <span class="hint">点击空白区域可取消高亮</span>
+    </div>
     <div class="chart-container" ref="chartContainer"></div>
     
     <!-- 调试面板 -->
@@ -239,6 +243,13 @@ onMounted(() => {
         resetHighlight()
       }
     })
+    .on("click", (event) => {
+      // 检查点击的是否是空白区域（不是节点或连接线）
+      const target = event.target
+      if (target.tagName === 'svg' || target.classList.contains('chart-container')) {
+        resetHighlight()
+      }
+    })
 
   const g = svg.append("g")
 
@@ -280,6 +291,7 @@ onMounted(() => {
 
   // 创建连接线
   const linkGroup = g.append("g")
+  const linkGroup = g.append("g")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.4)
     .selectAll("path")
@@ -291,8 +303,12 @@ onMounted(() => {
     .attr("class", "link")
     .attr("data-source", d => d.source.id)
     .attr("data-target", d => d.target.id)
+    .attr("class", "link")
+    .attr("data-source", d => d.source.id)
+    .attr("data-target", d => d.target.id)
 
   // 创建节点 - 使用foreignObject嵌入自定义DOM元素
+  const nodeGroup = g.append("g")
   const nodeGroup = g.append("g")
     .selectAll("foreignObject")
     .data(nodes)
@@ -303,9 +319,11 @@ onMounted(() => {
     .attr("height", d => d.group === 2 ? 24 : (d.y1 - d.y0))
     .attr("data-node-id", d => d.id)
     .attr("class", "node")
+    .attr("class", "node")
     .html(d => generateNodeHTML(d, color))
 
   // 添加节点标签
+  const labelGroup = g.append("g")
   const labelGroup = g.append("g")
     .selectAll("text")
     .data(nodes)
@@ -314,6 +332,8 @@ onMounted(() => {
     .attr("y", d => (d.y1 + d.y0) / 2)
     .attr("dy", "0.35em")
     .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
+    .attr("class", "node-label")
+    .attr("data-node-id", d => d.id)
     .attr("class", "node-label")
     .attr("data-node-id", d => d.id)
     .text(d => d.id)
@@ -464,6 +484,31 @@ const resetHighlight = () => {
   }
 }
 
+// 重置高亮效果
+const resetHighlight = () => {
+  activeNodeId.value = null
+  // 重置所有元素到默认状态
+  const linkGroup = d3.select(chartContainer.value).selectAll(".link")
+  const nodeGroup = d3.select(chartContainer.value).selectAll(".node")
+  const labelGroup = d3.select(chartContainer.value).selectAll(".node-label")
+  
+  if (!linkGroup.empty()) {
+    linkGroup
+      .style("opacity", 0.4)
+      .style("stroke-width", d => Math.max(1, d.width))
+  }
+  
+  if (!nodeGroup.empty()) {
+    nodeGroup.style("opacity", 1)
+  }
+  
+  if (!labelGroup.empty()) {
+    labelGroup
+      .style("opacity", 1)
+      .style("font-weight", "bold")
+  }
+}
+
 // 清理全局事件处理器
 onUnmounted(() => {
   delete window.handleNodeCheckbox
@@ -491,6 +536,7 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin: 20px 0;
   overflow: auto;
+  cursor: default;
   cursor: default;
 }
 
@@ -557,6 +603,47 @@ onUnmounted(() => {
   margin-top: 5px;
   color: #666;
   font-size: 10px;
+  font-style: italic;
+}
+
+/* 鼠标悬浮高亮效果样式 */
+.node {
+  transition: opacity 0.3s ease;
+}
+
+.node:hover {
+  cursor: pointer;
+}
+
+.link {
+  transition: opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.node-label {
+  transition: opacity 0.3s ease, font-weight 0.3s ease;
+}
+
+/* 控制面板样式 */
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.active-info {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.hint {
+  color: #6c757d;
+  font-size: 12px;
   font-style: italic;
 }
 
