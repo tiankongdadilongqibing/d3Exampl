@@ -5,10 +5,6 @@
       <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
       <span class="hint">点击空白区域可取消高亮</span>
     </div>
-    <div class="chart-controls">
-      <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
-      <span class="hint">点击空白区域可取消高亮</span>
-    </div>
     <div class="chart-container" ref="chartContainer"></div>
     
     <!-- 调试面板 -->
@@ -41,6 +37,8 @@ const activeNodeId = ref(null)
 let idToNode = {}
 // 各分组的最大 value（用于 group=2 的进度条归一化）
 let groupMaxValue = { 0: 0, 1: 0, 2: 0 }
+// 连接线宽度缩放函数（在布局完成后赋值，供重置时复用）
+let linkWidthScaleRef = null
 
 // 节点状态管理
 const nodeStates = ref({
@@ -117,7 +115,7 @@ const generateNodeHTML = (d, colorScale) => {
     const description = `优先级: ${nodeState.priority}；已启用特性: ${enabledFeatures || '无'}`
     return `
       <div style="width:100%;height:100%;box-sizing:border-box;border:1px solid #333;border-radius:4px;overflow:hidden;font-family:Arial,sans-serif;background:${nodeColor};color:#fff;display:flex;align-items:stretch;">
-        <div style="flex:0 0 150px;display:flex;align-items:center;justify-content:flex-start;padding:6px 10px;font-weight:bold;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.id}</div>
+        <div style="flex:0 0 100px;display:flex;align-items:center;justify-content:flex-start;padding:6px 10px;font-weight:bold;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.id}</div>
         <div style="flex:1;display:flex;align-items:center;padding:6px;">
           <div style="width:100%;background:#fff;color:#333;border-radius:3px;padding:6px 8px;font-size:9px;line-height:1.4;">
             ${description}
@@ -243,19 +241,12 @@ onMounted(() => {
         resetHighlight()
       }
     })
-    .on("click", (event) => {
-      // 检查点击的是否是空白区域（不是节点或连接线）
-      const target = event.target
-      if (target.tagName === 'svg' || target.classList.contains('chart-container')) {
-        resetHighlight()
-      }
-    })
 
   const g = svg.append("g")
 
   // 创建桑基图布局
   const sankeyLayout = sankey()
-    .nodeWidth(260)  // 进一步增加节点宽度以便 group=1 文本完整显示
+    .nodeWidth(240)  // 增加节点宽度以便 group=1 文本完整显示
     .nodePadding(24) // 适当增加节点间距，减少拥挤
     .extent([[1, 1], [width - 1, height - 5]])
 
@@ -288,9 +279,9 @@ onMounted(() => {
   // 为较小高度节点适配连接线厚度：将最大厚度压到 10px 以内
   const maxLinkThickness = d3.max(links, d => d.width) || 1
   const linkWidthScale = d3.scaleLinear().domain([0, maxLinkThickness]).range([1, 10])
+  linkWidthScaleRef = linkWidthScale
 
   // 创建连接线
-  const linkGroup = g.append("g")
   const linkGroup = g.append("g")
     .attr("fill", "none")
     .attr("stroke-opacity", 0.4)
@@ -303,12 +294,8 @@ onMounted(() => {
     .attr("class", "link")
     .attr("data-source", d => d.source.id)
     .attr("data-target", d => d.target.id)
-    .attr("class", "link")
-    .attr("data-source", d => d.source.id)
-    .attr("data-target", d => d.target.id)
 
   // 创建节点 - 使用foreignObject嵌入自定义DOM元素
-  const nodeGroup = g.append("g")
   const nodeGroup = g.append("g")
     .selectAll("foreignObject")
     .data(nodes)
@@ -319,11 +306,9 @@ onMounted(() => {
     .attr("height", d => d.group === 2 ? 24 : (d.y1 - d.y0))
     .attr("data-node-id", d => d.id)
     .attr("class", "node")
-    .attr("class", "node")
     .html(d => generateNodeHTML(d, color))
 
   // 添加节点标签
-  const labelGroup = g.append("g")
   const labelGroup = g.append("g")
     .selectAll("text")
     .data(nodes)
@@ -332,8 +317,6 @@ onMounted(() => {
     .attr("y", d => (d.y1 + d.y0) / 2)
     .attr("dy", "0.35em")
     .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
-    .attr("class", "node-label")
-    .attr("data-node-id", d => d.id)
     .attr("class", "node-label")
     .attr("data-node-id", d => d.id)
     .text(d => d.id)
@@ -470,32 +453,7 @@ const resetHighlight = () => {
   if (!linkGroup.empty()) {
     linkGroup
       .style("opacity", 0.4)
-      .style("stroke-width", d => Math.max(1, d.width))
-  }
-  
-  if (!nodeGroup.empty()) {
-    nodeGroup.style("opacity", 1)
-  }
-  
-  if (!labelGroup.empty()) {
-    labelGroup
-      .style("opacity", 1)
-      .style("font-weight", "bold")
-  }
-}
-
-// 重置高亮效果
-const resetHighlight = () => {
-  activeNodeId.value = null
-  // 重置所有元素到默认状态
-  const linkGroup = d3.select(chartContainer.value).selectAll(".link")
-  const nodeGroup = d3.select(chartContainer.value).selectAll(".node")
-  const labelGroup = d3.select(chartContainer.value).selectAll(".node-label")
-  
-  if (!linkGroup.empty()) {
-    linkGroup
-      .style("opacity", 0.4)
-      .style("stroke-width", d => Math.max(1, d.width))
+      .style("stroke-width", d => (linkWidthScaleRef ? linkWidthScaleRef(d.width) : Math.max(1, d.width)))
   }
   
   if (!nodeGroup.empty()) {
@@ -536,7 +494,6 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin: 20px 0;
   overflow: auto;
-  cursor: default;
   cursor: default;
 }
 
@@ -603,47 +560,6 @@ onUnmounted(() => {
   margin-top: 5px;
   color: #666;
   font-size: 10px;
-  font-style: italic;
-}
-
-/* 鼠标悬浮高亮效果样式 */
-.node {
-  transition: opacity 0.3s ease;
-}
-
-.node:hover {
-  cursor: pointer;
-}
-
-.link {
-  transition: opacity 0.3s ease, stroke-width 0.3s ease;
-}
-
-.node-label {
-  transition: opacity 0.3s ease, font-weight 0.3s ease;
-}
-
-/* 控制面板样式 */
-.chart-controls {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 15px;
-  padding: 10px;
-  background: white;
-  border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-}
-
-.active-info {
-  color: #28a745;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-.hint {
-  color: #6c757d;
-  font-size: 12px;
   font-style: italic;
 }
 
