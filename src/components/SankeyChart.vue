@@ -247,7 +247,7 @@ onMounted(() => {
   // 创建桑基图布局
   const sankeyLayout = sankey()
     .nodeWidth(240)  // 增加节点宽度以便 group=1 文本完整显示
-    .nodePadding(24) // 适当增加节点间距，减少拥挤
+    .nodePadding(24) // 减小节点间距，让 group=2 节点更紧凑
     .extent([[1, 1], [width - 1, height - 5]])
 
   // 计算布局
@@ -265,6 +265,21 @@ onMounted(() => {
     const v = n.value || 0
     if (v > groupMaxValue[gKey]) groupMaxValue[gKey] = v
   })
+
+  // 紧凑排列 group=2 节点（仅影响 group=2 的垂直间距）
+  const compactHeight = 24
+  const compactGap = 6
+  const group2Nodes = nodes.filter(n => n.group === 2)
+  if (group2Nodes.length > 0) {
+    const top = d3.min(group2Nodes, n => n.y0) || 0
+    group2Nodes.sort((a, b) => ((a.y0 + a.y1) / 2) - ((b.y0 + b.y1) / 2))
+    group2Nodes.forEach((n, idx) => {
+      const y0c = top + idx * (compactHeight + compactGap)
+      const y1c = y0c + compactHeight
+      n.y0 = y0c
+      n.y1 = y1c
+    })
+  }
 
   // 将与 group=2 节点相连的链接锚定到节点的垂直中点
   links.forEach(l => {
