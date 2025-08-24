@@ -29,7 +29,8 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import * as d3 from 'd3'
-import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
+// import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
+import { sankey, sankeyLinkHorizontal } from '../utils/sankeyUtils'
 
 const chartContainer = ref(null)
 const activeNodeId = ref(null)
