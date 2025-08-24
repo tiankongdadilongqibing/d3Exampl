@@ -29,7 +29,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import * as d3 from 'd3'
-// import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import { sankey, sankeyLinkHorizontal } from '../utils/sankeyUtils'
 
 const chartContainer = ref(null)
@@ -40,6 +39,8 @@ let idToNode = {}
 let groupMaxValue = { 0: 0, 1: 0, 2: 0 }
 // 连接线宽度缩放函数（在布局完成后赋值，供重置时复用）
 let linkWidthScaleRef = null
+// 颜色函数（与连接线保持一致）
+let colorFunction = null
 
 // 节点状态管理
 const nodeStates = ref({
@@ -87,9 +88,9 @@ const data = {
 }
 
 // 生成节点HTML内容（按 group 区分）
-const generateNodeHTML = (d, colorScale) => {
+const generateNodeHTML = (d, color) => {
   const nodeState = nodeStates.value[d.id] || { enabled: false, priority: '中', features: {} }
-  const nodeColor = colorScale(d.id)
+  const nodeColor = color(d.id) // 使用与连接线相同的颜色逻辑
 
   // group = 2: 蓝条灰底进度条
   if (d.group === 2) {
@@ -211,8 +212,7 @@ const updateNodeDisplay = (nodeId) => {
   const node = d3.select(chartContainer.value).select(`foreignObject[data-node-id="${nodeId}"]`)
   if (!node.empty()) {
     const nodeData = idToNode[nodeId] || { id: nodeId, group: 0, value: 0 }
-    const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
-    node.html(generateNodeHTML(nodeData, colorScale))
+    node.html(generateNodeHTML(nodeData, colorFunction))
   }
 }
 
@@ -229,6 +229,7 @@ onMounted(() => {
   const height = 800
 
   const color = d3.scaleOrdinal(d3.schemeCategory10)
+  colorFunction = color
 
   const svg = d3.select(chartContainer.value)
     .append("svg")
