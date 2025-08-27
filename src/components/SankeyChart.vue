@@ -4,9 +4,42 @@
     <div class="chart-controls">
       <span v-if="activeNodeId" class="active-info">当前激活: {{ activeNodeId }}</span>
       <span class="hint">点击空白区域可取消高亮</span>
+      <button @click="showExtraNodePanel = !showExtraNodePanel" class="control-btn">添加节点</button>
     </div>
     <div class="chart-container" ref="chartContainer"></div>
     
+    <!-- 额外节点面板 -->
+    <div v-if="showExtraNodePanel" class="extra-node-panel">
+      <h3>添加额外节点</h3>
+      <div class="extra-node-form">
+        <div class="form-group">
+          <label>节点名称:</label>
+          <input v-model="newNodeName" type="text" placeholder="输入节点名称" />
+        </div>
+        <div class="form-group">
+          <label>分组:</label>
+          <select v-model="newNodeGroup">
+            <option value="0">Group 0 (目标)</option>
+            <option value="1">Group 1 (技术)</option>
+            <option value="2">Group 2 (领域)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>数值:</label>
+          <input v-model="newNodeValue" type="number" min="1" max="100" />
+        </div>
+        <button @click="addNewExtraNode" class="add-btn">添加节点</button>
+      </div>
+      
+      <div class="extra-nodes-list">
+        <h4>已添加的额外节点</h4>
+        <div v-for="node in extraNodes" :key="node.id" class="extra-node-item">
+          <span>{{ node.name }} (Group {{ node.group }})</span>
+          <button @click="removeExtraNode(node.id)" class="remove-btn">删除</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 调试面板 -->
     <div class="debug-panel">
       <h3>节点状态监控</h3>
@@ -27,12 +60,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import * as d3 from 'd3'
 import { sankey, sankeyLinkHorizontal } from '../utils/sankeyUtils'
+import { customColors } from '../utils/color'
+
+// 自定义颜色数组 - 可以根据需要调整颜色
+// 方案1: 经典配色（当前使用）
 
 const chartContainer = ref(null)
 const activeNodeId = ref(null)
+const showExtraNodePanel = ref(false)
+const newNodeName = ref('')
+const newNodeGroup = ref('0')
+const newNodeValue = ref(1)
 // 保存布局后的节点，便于按 id 定位节点（含 group/value 等信息）
 let idToNode = {}
 // 各分组的最大 value（用于 group=2 的进度条归一化）
@@ -54,7 +95,8 @@ const nodeStates = ref({
   "D3.js": { enabled: true, priority: "中", features: { "动画": true, "交互": true, "自定义": true } },
   "ECharts": { enabled: false, priority: "低", features: { "图表类型": true, "主题": false, "导出": true } },
   "Web应用": { enabled: true, priority: "高", features: { "性能": true, "SEO": true, "PWA": false } },
-  "数据分析": { enabled: false, priority: "中", features: { "报表": true, "仪表板": false, "实时": true } }
+  "数据分析": { enabled: false, priority: "中", features: { "报表": true, "仪表板": false, "实时": true } },
+  "EChartss": { enabled: false, priority: "低", features: { "图表类型": true, "主题": false, "导出": true } },
 })
 
 const data = {
@@ -68,6 +110,7 @@ const data = {
     { id: "Python", group: 1 },
     { id: "D3.js", group: 1 },
     { id: "ECharts", group: 1 },
+    { id: "EChartss", group: 1 },
     { id: "Web应用", group: 0 },
     { id: "数据分析", group: 0 }
   ],
@@ -91,6 +134,33 @@ const data = {
 const generateNodeHTML = (d, color) => {
   const nodeState = nodeStates.value[d.id] || { enabled: false, priority: '中', features: {} }
   const nodeColor = color(d.id) // 使用与连接线相同的颜色逻辑
+
+  // 额外节点的特殊样式
+  if (d.isExtra) {
+    return `
+      <div style="
+        width: 100%;
+        height: 100%;
+        padding: 2px 4px;
+        background: #f0f0f0;
+        border: 1px dashed #999;
+        border-radius: 4px;
+        color: #666;
+        font-family: Arial, sans-serif;
+        font-size: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        cursor: default;
+        overflow: hidden;
+        text-align: center;
+      ">
+        <span style="font-weight: bold; color: #333;">${d.name}</span>
+        <span style="margin-left: 4px; font-size: 8px; color: #999;">(额外)</span>
+      </div>
+    `
+  }
 
   // group = 2: 蓝条灰底进度条
   if (d.group === 2) {
@@ -224,17 +294,179 @@ const setupGlobalHandlers = () => {
   window.handleActionClick = handleActionClick
 }
 
-onMounted(() => {
-  const width = 1400
-  const height = 800
+// 重新渲染图表的方法
+const renderChart = () => {
+  if (!chartContainer.value) return
+  
+  // 清空现有内容
+  d3.select(chartContainer.value).selectAll("*").remove()
+  
+  // 重新初始化图表
+  initializeChart()
+}
 
-  const color = d3.scaleOrdinal(d3.schemeCategory10)
+// 添加额外节点的方法
+const addExtraNode = (nodeName, group, value = 1) => {
+  // 创建新的额外节点
+  const extraNode = {
+    id: `extra_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    name: nodeName,
+    group: group,
+    value: value,
+    isExtra: true // 标记为额外节点
+  }
+  
+  // 添加到数据中
+  data.nodes.push(extraNode)
+  
+  // 重新渲染图表
+  renderChart()
+}
+
+// 移除额外节点的方法
+const removeExtraNode = (nodeId) => {
+  const index = data.nodes.findIndex(node => node.id === nodeId && node.isExtra)
+  if (index !== -1) {
+    data.nodes.splice(index, 1)
+    renderChart()
+  }
+}
+
+// 获取所有额外节点
+const getExtraNodes = () => {
+  return data.nodes.filter(node => node.isExtra)
+}
+
+// 计算属性：获取所有额外节点
+const extraNodes = computed(() => {
+  return data.nodes.filter(node => node.isExtra)
+})
+
+// 添加新额外节点的方法
+const addNewExtraNode = () => {
+  if (!newNodeName.value.trim()) {
+    alert('请输入节点名称')
+    return
+  }
+  
+  addExtraNode(
+    newNodeName.value.trim(),
+    parseInt(newNodeGroup.value),
+    parseInt(newNodeValue.value)
+  )
+  
+  // 清空表单
+  newNodeName.value = ''
+  newNodeGroup.value = '0'
+  newNodeValue.value = 1
+}
+
+// 响应式调整函数
+const resizeChart = () => {
+  if (!chartContainer.value) return
+  
+  const container = chartContainer.value
+  const containerRect = container.getBoundingClientRect()
+  const width = Math.max(containerRect.width || 1400, 800)  // 最小宽度 800px
+  const height = Math.max(containerRect.height || 800, 600) // 最小高度 600px
+  
+  const svg = d3.select(chartContainer.value).select("svg")
+  if (!svg.empty()) {
+    // 只调整宽度，保持原始高度
+    svg.attr("width", width)
+      .attr("height", height)
+      .attr("viewBox", `0 0 ${width} ${height}`)
+    
+    // 重新计算布局以适应新宽度
+    const sankeyLayout = sankey()
+      .nodeWidth(Math.min(240, width * 0.15))  // 节点宽度根据容器宽度调整
+      .nodePadding(24) // 保持固定的节点间距
+      .extent([[1, 1], [width - 1, height - 5]])
+    
+    // 分离原始节点和额外节点
+    const originalNodes = data.nodes.filter(node => !node.isExtra)
+    const extraNodes = data.nodes.filter(node => node.isExtra)
+    
+    // 为每个group计算额外节点的位置
+    const groupExtraNodes = {}
+    extraNodes.forEach(node => {
+      if (!groupExtraNodes[node.group]) {
+        groupExtraNodes[node.group] = []
+      }
+      groupExtraNodes[node.group].push(node)
+    })
+    
+    // 计算原始节点的布局
+    const { nodes: originalLayoutNodes, links } = sankeyLayout({
+      nodes: originalNodes.map(d => Object.assign({}, d)),
+      links: data.links.map(d => Object.assign({}, d))
+    })
+    
+    // 为额外节点计算位置
+    const allNodes = [...originalLayoutNodes]
+    Object.keys(groupExtraNodes).forEach(group => {
+      const groupNodes = originalLayoutNodes.filter(n => n.group === parseInt(group))
+      const extraNodesInGroup = groupExtraNodes[group]
+      
+      if (groupNodes.length > 0 && extraNodesInGroup.length > 0) {
+        const groupNode = groupNodes[0] // 取第一个节点作为参考
+        const nodeHeight = 24 // 额外节点的高度
+        const padding = 8 // 额外节点之间的间距
+        
+        extraNodesInGroup.forEach((extraNode, index) => {
+          // 计算额外节点的位置
+          const extraNodeLayout = {
+            ...extraNode,
+            x0: groupNode.x0,
+            x1: groupNode.x1,
+            y0: groupNode.y1 + padding + index * (nodeHeight + padding),
+            y1: groupNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
+            value: extraNode.value
+          }
+          allNodes.push(extraNodeLayout)
+        })
+      }
+    })
+    
+    const nodes = allNodes
+    
+    // 更新节点位置
+    const nodeGroup = svg.select("g").selectAll(".node")
+    nodeGroup
+      .attr("x", d => d.x0)
+      .attr("y", d => d.group === 2 ? d.y0 + Math.max(0, (d.y1 - d.y0 - 24) / 2) : d.y0)
+      .attr("width", d => d.x1 - d.x0)
+      .attr("height", d => d.group === 2 ? 24 : (d.y1 - d.y0))
+    
+    // 更新连接线
+    const linkGroup = svg.select("g").selectAll(".link")
+    linkGroup.attr("d", sankeyLinkHorizontal())
+    
+    // 更新标签位置
+    const labelGroup = svg.select("g").selectAll(".node-label")
+    labelGroup
+      .attr("x", d => d.x0 < width / 2 ? d.x0 - 6 : d.x1 + 6)
+      .attr("y", d => (d.y1 + d.y0) / 2)
+      .attr("text-anchor", d => d.x0 < width / 2 ? "end" : "start")
+  }
+}
+
+// 初始化图表的方法
+const initializeChart = () => {
+  // 获取容器尺寸
+  const container = chartContainer.value
+  const containerRect = container.getBoundingClientRect()
+  const width = containerRect.width || 1400
+  const height = containerRect.height || 800
+
+  const color = d3.scaleOrdinal(customColors)
   colorFunction = color
 
   const svg = d3.select(chartContainer.value)
     .append("svg")
-    .attr("width", width)
-    .attr("height", height)
+    .attr("width", "100%")
+    .attr("height", "100%")
+    .attr("viewBox", `0 0 ${width} ${height}`)
     .style("font", "12px sans-serif")
     .on("click", (event) => {
       // 检查点击的是否是空白区域（不是节点或连接线）
@@ -246,17 +478,58 @@ onMounted(() => {
 
   const g = svg.append("g")
 
+    // 分离原始节点和额外节点
+  const originalNodes = data.nodes.filter(node => !node.isExtra)
+  const extraNodes = data.nodes.filter(node => node.isExtra)
+  
+  // 为每个group计算额外节点的位置
+  const groupExtraNodes = {}
+  extraNodes.forEach(node => {
+    if (!groupExtraNodes[node.group]) {
+      groupExtraNodes[node.group] = []
+    }
+    groupExtraNodes[node.group].push(node)
+  })
+  
   // 创建桑基图布局
   const sankeyLayout = sankey()
-    .nodeWidth(240)  // 增加节点宽度以便 group=1 文本完整显示
-    .nodePadding(24) // 减小节点间距，让 group=2 节点更紧凑
+    .nodeWidth(Math.min(240, width * 0.15))  // 节点宽度根据容器宽度调整
+    .nodePadding(24) // 保持固定的节点间距
     .extent([[1, 1], [width - 1, height - 5]])
-
-  // 计算布局
-  const { nodes, links } = sankeyLayout({
-    nodes: data.nodes.map(d => Object.assign({}, d)),
+  
+  // 计算原始节点的布局
+  const { nodes: originalLayoutNodes, links } = sankeyLayout({
+    nodes: originalNodes.map(d => Object.assign({}, d)),
     links: data.links.map(d => Object.assign({}, d))
   })
+  
+  // 为额外节点计算位置
+  const allNodes = [...originalLayoutNodes]
+  Object.keys(groupExtraNodes).forEach(group => {
+    const groupNodes = originalLayoutNodes.filter(n => n.group === parseInt(group))
+    const extraNodesInGroup = groupExtraNodes[group]
+    
+    if (groupNodes.length > 0 && extraNodesInGroup.length > 0) {
+      const groupNode = groupNodes[0] // 取第一个节点作为参考
+      const nodeHeight = 24 // 额外节点的高度
+      const padding = 8 // 额外节点之间的间距
+      
+      extraNodesInGroup.forEach((extraNode, index) => {
+        // 计算额外节点的位置
+        const extraNodeLayout = {
+          ...extraNode,
+          x0: groupNode.x0,
+          x1: groupNode.x1,
+          y0: groupNode.y1 + padding + index * (nodeHeight + padding),
+          y1: groupNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
+          value: extraNode.value
+        }
+        allNodes.push(extraNodeLayout)
+      })
+    }
+  })
+  
+  const nodes = allNodes
 
   // 建立 id -> node 的索引，并计算各组最大值
   idToNode = {}
@@ -322,7 +595,13 @@ onMounted(() => {
     .attr("width", d => d.x1 - d.x0)
     .attr("height", d => d.group === 2 ? 24 : (d.y1 - d.y0))
     .attr("data-node-id", d => d.id)
-    .attr("class", "node")
+    .attr("class", d => `node ${d.isExtra ? 'extra-node' : ''}`)
+    .style("cursor", d => d.isExtra ? "default" : "pointer")
+    .on("click", (event, d) => {
+      if (!d.isExtra) {
+        handleNodeClick(event, d)
+      }
+    })
     .html(d => generateNodeHTML(d, color))
 
   // 添加节点标签
@@ -457,6 +736,22 @@ onMounted(() => {
 
   // 设置全局事件处理器
   setupGlobalHandlers()
+}
+
+onMounted(() => {
+  // 初始化图表
+  initializeChart()
+  
+  // 设置窗口大小变化监听器
+  window.addEventListener('resize', resizeChart)
+  
+  // 使用 ResizeObserver 监听容器大小变化
+  const resizeObserver = new ResizeObserver(() => {
+    resizeChart()
+  })
+  if (chartContainer.value) {
+    resizeObserver.observe(chartContainer.value)
+  }
 })
 
 // 重置高亮效果
@@ -490,6 +785,9 @@ onUnmounted(() => {
   delete window.handlePriorityChange
   delete window.handleFeatureChange
   delete window.handleActionClick
+  
+  // 清理窗口大小变化监听器
+  window.removeEventListener('resize', resizeChart)
 })
 </script>
 
@@ -512,6 +810,7 @@ onUnmounted(() => {
   margin: 20px 0;
   overflow: auto;
   cursor: default;
+  position: relative;
 }
 
 .debug-panel {
@@ -619,5 +918,133 @@ onUnmounted(() => {
   color: #6c757d;
   font-size: 12px;
   font-style: italic;
+}
+
+/* 额外节点面板样式 */
+.extra-node-panel {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.extra-node-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 15px;
+  align-items: end;
+  margin-bottom: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-group label {
+  font-weight: bold;
+  font-size: 14px;
+  color: #333;
+}
+
+.form-group input,
+.form-group select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.add-btn {
+  padding: 8px 16px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.add-btn:hover {
+  background: #45a049;
+}
+
+.extra-nodes-list {
+  border-top: 1px solid #eee;
+  padding-top: 15px;
+}
+
+.extra-nodes-list h4 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.extra-node-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  margin-bottom: 5px;
+}
+
+.remove-btn {
+  padding: 4px 8px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.remove-btn:hover {
+  background: #d32f2f;
+}
+
+/* 额外节点样式 */
+.extra-node {
+  opacity: 0.8;
+}
+
+.extra-node:hover {
+  opacity: 1;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .sankey-chart {
+    padding: 10px;
+  }
+  
+  .chart-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .debug-panel {
+    padding: 15px;
+  }
+  
+  .node-states {
+    grid-template-columns: 1fr;
+  }
+  
+  .extra-node-form {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sankey-chart h2 {
+    font-size: 18px;
+  }
 }
 </style>
