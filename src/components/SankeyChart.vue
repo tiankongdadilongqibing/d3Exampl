@@ -408,23 +408,45 @@ const resizeChart = () => {
       const groupNodes = originalLayoutNodes.filter(n => n.group === parseInt(group))
       const extraNodesInGroup = groupExtraNodes[group]
       
-      if (groupNodes.length > 0 && extraNodesInGroup.length > 0) {
-        const groupNode = groupNodes[0] // 取第一个节点作为参考
+      if (extraNodesInGroup.length > 0) {
         const nodeHeight = 24 // 额外节点的高度
         const padding = 8 // 额外节点之间的间距
         
-        extraNodesInGroup.forEach((extraNode, index) => {
-          // 计算额外节点的位置
-          const extraNodeLayout = {
-            ...extraNode,
-            x0: groupNode.x0,
-            x1: groupNode.x1,
-            y0: groupNode.y1 + padding + index * (nodeHeight + padding),
-            y1: groupNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
-            value: extraNode.value
-          }
-          allNodes.push(extraNodeLayout)
-        })
+        if (groupNodes.length > 0) {
+          // 如果该group有原始节点，找到最下方的节点作为参考
+          const bottomNode = groupNodes.reduce((max, node) => 
+            node.y1 > max.y1 ? node : max, groupNodes[0])
+          
+          extraNodesInGroup.forEach((extraNode, index) => {
+            const extraNodeLayout = {
+              ...extraNode,
+              x0: bottomNode.x0,
+              x1: bottomNode.x1,
+              y0: bottomNode.y1 + padding + index * (nodeHeight + padding),
+              y1: bottomNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
+              value: extraNode.value
+            }
+            allNodes.push(extraNodeLayout)
+          })
+        } else {
+          // 如果该group没有原始节点，根据group计算默认位置
+          const groupNum = parseInt(group)
+          const defaultX0 = groupNum * (width / 3) + 50 // 根据group分布在不同列
+          const defaultX1 = defaultX0 + Math.min(240, width * 0.15) // 使用默认节点宽度
+          const startY = 100 + groupNum * 50 // 不同group有不同的起始Y位置
+          
+          extraNodesInGroup.forEach((extraNode, index) => {
+            const extraNodeLayout = {
+              ...extraNode,
+              x0: defaultX0,
+              x1: defaultX1,
+              y0: startY + index * (nodeHeight + padding),
+              y1: startY + (index + 1) * nodeHeight + index * padding,
+              value: extraNode.value
+            }
+            allNodes.push(extraNodeLayout)
+          })
+        }
       }
     })
     
@@ -509,23 +531,45 @@ const initializeChart = () => {
     const groupNodes = originalLayoutNodes.filter(n => n.group === parseInt(group))
     const extraNodesInGroup = groupExtraNodes[group]
     
-    if (groupNodes.length > 0 && extraNodesInGroup.length > 0) {
-      const groupNode = groupNodes[0] // 取第一个节点作为参考
+    if (extraNodesInGroup.length > 0) {
       const nodeHeight = 24 // 额外节点的高度
       const padding = 8 // 额外节点之间的间距
       
-      extraNodesInGroup.forEach((extraNode, index) => {
-        // 计算额外节点的位置
-        const extraNodeLayout = {
-          ...extraNode,
-          x0: groupNode.x0,
-          x1: groupNode.x1,
-          y0: groupNode.y1 + padding + index * (nodeHeight + padding),
-          y1: groupNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
-          value: extraNode.value
-        }
-        allNodes.push(extraNodeLayout)
-      })
+      if (groupNodes.length > 0) {
+        // 如果该group有原始节点，找到最下方的节点作为参考
+        const bottomNode = groupNodes.reduce((max, node) => 
+          node.y1 > max.y1 ? node : max, groupNodes[0])
+        
+        extraNodesInGroup.forEach((extraNode, index) => {
+          const extraNodeLayout = {
+            ...extraNode,
+            x0: bottomNode.x0,
+            x1: bottomNode.x1,
+            y0: bottomNode.y1 + padding + index * (nodeHeight + padding),
+            y1: bottomNode.y1 + padding + (index + 1) * nodeHeight + index * padding,
+            value: extraNode.value
+          }
+          allNodes.push(extraNodeLayout)
+        })
+      } else {
+        // 如果该group没有原始节点，根据group计算默认位置
+        const groupNum = parseInt(group)
+        const defaultX0 = groupNum * (width / 3) + 50 // 根据group分布在不同列
+        const defaultX1 = defaultX0 + Math.min(240, width * 0.15) // 使用默认节点宽度
+        const startY = 100 + groupNum * 50 // 不同group有不同的起始Y位置
+        
+        extraNodesInGroup.forEach((extraNode, index) => {
+          const extraNodeLayout = {
+            ...extraNode,
+            x0: defaultX0,
+            x1: defaultX1,
+            y0: startY + index * (nodeHeight + padding),
+            y1: startY + (index + 1) * nodeHeight + index * padding,
+            value: extraNode.value
+          }
+          allNodes.push(extraNodeLayout)
+        })
+      }
     }
   })
   
