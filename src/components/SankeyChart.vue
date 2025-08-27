@@ -28,6 +28,12 @@
           <label>数值:</label>
           <input v-model="newNodeValue" type="number" min="1" max="100" />
         </div>
+        <div class="form-group">
+          <label>
+            <input v-model="alignToRight" type="checkbox" />
+            贴在右边
+          </label>
+        </div>
         <button @click="addNewExtraNode" class="add-btn">添加节点</button>
       </div>
       
@@ -74,6 +80,7 @@ const showExtraNodePanel = ref(false)
 const newNodeName = ref('')
 const newNodeGroup = ref('0')
 const newNodeValue = ref(1)
+const alignToRight = ref(false)
 // 保存布局后的节点，便于按 id 定位节点（含 group/value 等信息）
 let idToNode = {}
 // 各分组的最大 value（用于 group=2 的进度条归一化）
@@ -305,15 +312,41 @@ const renderChart = () => {
   initializeChart()
 }
 
+// 获取SVG最右边坐标的方法
+const getSvgRightmostPosition = () => {
+  if (!chartContainer.value) return 0
+  
+  const svg = d3.select(chartContainer.value).select("svg")
+  if (svg.empty()) return 0
+  
+  const viewBox = svg.attr("viewBox")
+  if (viewBox) {
+    const [, , svgWidth] = viewBox.split(" ").map(Number)
+    return svgWidth
+  }
+  
+  // 如果没有viewBox，尝试获取width属性
+  const width = svg.attr("width")
+  if (width && width !== "100%") {
+    return parseInt(width)
+  }
+  
+  // 最后尝试获取容器宽度
+  const container = chartContainer.value
+  const containerRect = container.getBoundingClientRect()
+  return containerRect.width || 1400
+}
+
 // 添加额外节点的方法
-const addExtraNode = (nodeName, group, value = 1) => {
+const addExtraNode = (nodeName, group, value = 1, alignToRight = false) => {
   // 创建新的额外节点
   const extraNode = {
     id: `extra_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     name: nodeName,
     group: group,
     value: value,
-    isExtra: true // 标记为额外节点
+    isExtra: true, // 标记为额外节点
+    alignToRight: alignToRight // 是否贴在右边
   }
   
   // 添加到数据中
@@ -352,13 +385,15 @@ const addNewExtraNode = () => {
   addExtraNode(
     newNodeName.value.trim(),
     parseInt(newNodeGroup.value),
-    parseInt(newNodeValue.value)
+    parseInt(newNodeValue.value),
+    alignToRight.value
   )
   
   // 清空表单
   newNodeName.value = ''
   newNodeGroup.value = '0'
   newNodeValue.value = 1
+  alignToRight.value = false
 }
 
 // 响应式调整函数
@@ -429,19 +464,32 @@ const resizeChart = () => {
             allNodes.push(extraNodeLayout)
           })
         } else {
-          // 如果该group没有原始节点，根据group计算默认位置
-          const groupNum = parseInt(group)
-          const defaultX0 = groupNum * (width / 3) + 50 // 根据group分布在不同列
-          const defaultX1 = defaultX0 + Math.min(240, width * 0.15) // 使用默认节点宽度
-          const startY = 100 + groupNum * 50 // 不同group有不同的起始Y位置
-          
+          // 如果该group没有原始节点，根据alignToRight属性决定位置
           extraNodesInGroup.forEach((extraNode, index) => {
+            let x0, x1
+            
+            if (extraNode.alignToRight) {
+              // 贴在SVG最右边
+              const svgRightmost = getSvgRightmostPosition()
+              const nodeWidth = Math.min(240, width * 0.15) // 节点宽度
+              const margin = 20 // 右边距
+              x0 = svgRightmost - nodeWidth - margin
+              x1 = svgRightmost - margin
+            } else {
+              // 使用默认位置（根据group分布）
+              const groupNum = parseInt(group)
+              const defaultX0 = groupNum * (width / 3) + 50
+              const defaultX1 = defaultX0 + Math.min(240, width * 0.15)
+              x0 = defaultX0
+              x1 = defaultX1
+            }
+            
             const extraNodeLayout = {
               ...extraNode,
-              x0: defaultX0,
-              x1: defaultX1,
-              y0: startY + index * (nodeHeight + padding),
-              y1: startY + (index + 1) * nodeHeight + index * padding,
+              x0: x0,
+              x1: x1,
+              y0: 100 + index * (nodeHeight + padding), // 从顶部开始排列
+              y1: 100 + (index + 1) * nodeHeight + index * padding,
               value: extraNode.value
             }
             allNodes.push(extraNodeLayout)
@@ -552,19 +600,32 @@ const initializeChart = () => {
           allNodes.push(extraNodeLayout)
         })
       } else {
-        // 如果该group没有原始节点，根据group计算默认位置
-        const groupNum = parseInt(group)
-        const defaultX0 = groupNum * (width / 3) + 50 // 根据group分布在不同列
-        const defaultX1 = defaultX0 + Math.min(240, width * 0.15) // 使用默认节点宽度
-        const startY = 100 + groupNum * 50 // 不同group有不同的起始Y位置
-        
+        // 如果该group没有原始节点，根据alignToRight属性决定位置
         extraNodesInGroup.forEach((extraNode, index) => {
+          let x0, x1
+          
+          if (extraNode.alignToRight) {
+            // 贴在SVG最右边
+            const svgRightmost = getSvgRightmostPosition()
+            const nodeWidth = Math.min(240, width * 0.15) // 节点宽度
+            const margin = 20 // 右边距
+            x0 = svgRightmost - nodeWidth - margin
+            x1 = svgRightmost - margin
+          } else {
+            // 使用默认位置（根据group分布）
+            const groupNum = parseInt(group)
+            const defaultX0 = groupNum * (width / 3) + 50
+            const defaultX1 = defaultX0 + Math.min(240, width * 0.15)
+            x0 = defaultX0
+            x1 = defaultX1
+          }
+          
           const extraNodeLayout = {
             ...extraNode,
-            x0: defaultX0,
-            x1: defaultX1,
-            y0: startY + index * (nodeHeight + padding),
-            y1: startY + (index + 1) * nodeHeight + index * padding,
+            x0: x0,
+            x1: x1,
+            y0: 100 + index * (nodeHeight + padding), // 从顶部开始排列
+            y1: 100 + (index + 1) * nodeHeight + index * padding,
             value: extraNode.value
           }
           allNodes.push(extraNodeLayout)
@@ -1000,6 +1061,18 @@ onUnmounted(() => {
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 14px;
+}
+
+.form-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.form-group input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .add-btn {
